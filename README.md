@@ -1,196 +1,131 @@
+
 # ShadowTrace: Blockchain Intelligence & Threat Detection Platform
 
-!(https://img.shields.io/badge/status-in%20development-blue.svg)
+![Status](https://img.shields.io/badge/status-in%20development-blue.svg)
+![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)
+![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)
 
-!(https://www.google.com/search?q=https://img.shields.io/badge/contributions-welcome-brightgreen.svg)
-
-**ShadowTrace** is an intelligence-grade platform for blockchain forensics, real-time threat detection, and operational security. It is designed to combat the rising tide of illicit on-chain activities by providing actionable intelligence to security analysts, DeFi developers, and institutional risk managers.
-
----
-
-## Table of Contents
-
-1. (#the-problem)
-2. (#the-solution-shadowtrace)
-3. [Key Features](https://www.google.com/search?q=%23key-features)
-4. (#technology-stack)
-5. (#system-architecture)
-6. (#getting-started)
-   * [Prerequisites](https://www.google.com/search?q=%23prerequisites)
-   * [Installation](https://www.google.com/search?q=%23installation)
-7. [Usage](https://www.google.com/search?q=%23usage)
-8. (#project-roadmap)
-9. [Contributing](https://www.google.com/search?q=%23contributing)
-10. [License](https://www.google.com/search?q=%23license)
-11. [Acknowledgments](https://www.google.com/search?q=%23acknowledgments)
+**ShadowTrace** is an intelligence-grade platform for blockchain forensics, real-time threat detection, and operational security.
+It is designed to combat the rising tide of illicit on-chain activities by providing actionable intelligence to security analysts, DeFi developers, and institutional risk managers.
 
 ---
 
-## The Problem
+## 📑 Table of Contents
+
+1. [The Problem](#the-problem)
+2. [The Solution: ShadowTrace](#the-solution-shadowtrace)
+3. [Key Features](#key-features)
+4. [Technology Stack](#technology-stack)
+5. [System Architecture](#system-architecture)
+6. [Getting Started](#getting-started)
+   - [Prerequisites](#prerequisites)
+   - [Installation](#installation)
+7. [Usage](#usage)
+8. [Project Roadmap](#project-roadmap)
+9. [Contributing](#contributing)
+10. [License](#license)
+11. [Acknowledgments](#acknowledgments)
+
+---
+
+## ❗ The Problem
 
 The cryptocurrency ecosystem, while innovative, has become a significant vector for illicit finance. The scale and complexity of on-chain crime are escalating rapidly:
 
-* **Massive Illicit Volume:** An estimated **$51 billion** flowed to illicit crypto wallets in 2024.^1^
-* **Evolving Laundering Tactics:** Criminals have strategically shifted from volatile assets to stablecoins, which now account for  **63% of all illicit crypto laundering** .^1^
-* **Sophisticated Obfuscation:** The use of cross-chain bridges and decentralized exchanges (DEXs) to "chain-hop" and launder funds surged past **$21 billion** in 2025, a threefold increase from 2023.^2^
+- **Massive Illicit Volume:** An estimated **$51 billion** flowed to illicit crypto wallets in 2024.
+- **Evolving Laundering Tactics:** Criminals have strategically shifted from volatile assets to stablecoins, now accounting for **63% of all illicit laundering**.
+- **Sophisticated Obfuscation:** Use of cross-chain bridges and decentralized exchanges (DEXs) for laundering surged past **$21 billion in 2025**, tripling since 2023.
 
-Traditional blockchain explorers are passive tools, and many professional forensic platforms are reactive, focusing on post-mortem investigation. This leaves a critical gap for a proactive, real-time operational security platform that can detect and prevent threats as they emerge.
+Traditional blockchain explorers are passive and forensic platforms are reactive. This leaves a critical gap: a **proactive, real-time operational security platform** to detect and prevent threats as they emerge.
 
-## The Solution: ShadowTrace
+---
 
-ShadowTrace is engineered to be the "windshield" for on-chain security, providing the real-time situational awareness needed to combat modern threats. It moves beyond historical analysis to provide live, actionable intelligence.
+## ✅ The Solution: ShadowTrace
 
-Our unique value proposition is built on three pillars ^3^:
+ShadowTrace is engineered to be the **windshield for on-chain security**. It moves beyond historical analysis into **real-time, actionable intelligence**.
 
-1. **Real-Time Situational Awareness:** Live telemetry and an operational dashboard provide a common operating picture of on-chain activity.
-2. **Proactive Threat Detection:** Advanced AI/ML models predict and flag suspicious activity before funds are lost.
-3. **Integrated Context:** We fuse on-chain data with a deep layer of off-chain intelligence (OSINT) to provide a complete, actionable picture.
+### Our Value Proposition
 
-## Key Features
+1. **Real-Time Situational Awareness:** Live telemetry with an operational dashboard for on-chain monitoring.
+2. **Proactive Threat Detection:** AI/ML models predict and flag suspicious activity before losses occur.
+3. **Integrated Context:** On-chain + OSINT data fusion for actionable, contextualized intelligence.
 
-* **Live Blockchain Telemetry:** Real-time ingestion and parsing of on-chain transactions, blocks, and smart contract events for immediate analysis.
-* **AI/ML Anomaly Detection:** A sophisticated suite of models to identify complex illicit activities:
-  * **Graph Neural Networks (GNNs):** Uncover hidden relationships and detect sophisticated money laundering networks.^5^
-  * **Isolation Forest:** Efficiently detects rare and unusual wallet behaviors that deviate from the norm.^8^
-  * **Autoencoders:** Learn "normal" transaction patterns to flag novel threats and deviations with high accuracy.^14^
-  * **LSTM/Transformer Models:** Analyze transaction sequences over time to predict fraud and identify attack preparation stages.
-* **Smart Contract Reconnaissance:** Automated scanning of smart contracts using industry-standard tools like **Mythril** and **Slither** to detect vulnerabilities such as reentrancy, integer overflows, and malicious logic.^18^
-* **OSINT Correlation:** Enriches on-chain data by linking addresses to sanctioned entities (OFAC, EU), leaked databases, and dark web intelligence feeds.^24^
-* **Operational Analyst Dashboard:** An intuitive, role-based web console built with React and D3.js for real-time alerts, interactive graph visualization, investigation workflows, and case reporting.
+---
 
-## Technology Stack
+## 🚀 Key Features
 
-| Layer                          | Technology                                                |
-| ------------------------------ | --------------------------------------------------------- |
-| **Frontend**             | React.js, Tailwind CSS, D3.js, Axios, React Router        |
-| **Backend API**          | Node.js + Express.js                                      |
-| **ML Inference Service** | Python, Flask/FastAPI                                     |
-| **Blockchain Layer**     | Ethers.js, Web3.js, Solidity                              |
-| **Databases**            | PostgreSQL (Structured Data), MongoDB (Graph/Intel Store) |
-| **AI/ML Libraries**      | Scikit-learn, Pandas, NumPy, PyTorch                      |
-| **Security Tools**       | Mythril, Slither, Echidna                                 |
-| **DevOps**               | Docker, AWS (EC2/RDS/S3), GitHub Actions, Nginx           |
-| **OSINT Tools**          | OpenSanctions API, DarkSearch API, Custom Scripts         |
+- **Live Blockchain Telemetry:** Real-time ingestion and parsing of blocks, transactions, and events.
+- **AI/ML Anomaly Detection:**
+  - Graph Neural Networks (GNNs) → Detect laundering networks.
+  - Isolation Forest → Spot rare wallet behaviors.
+  - Autoencoders → Identify deviations from "normal" transaction patterns.
+  - LSTM/Transformers → Sequence-based fraud/attack prediction.
+- **Smart Contract Reconnaissance:** Mythril, Slither, Echidna for vulnerability scans.
+- **OSINT Correlation:** Links addresses to sanctions, leaks, and dark web intel.
+- **Operational Dashboard:** Role-based, built with React + D3.js, interactive graph tracing, real-time alerts, and case reporting.
 
-## System Architecture
+---
 
-ShadowTrace employs a multi-layered, service-oriented architecture designed for scalability and performance. At its core is a **hybrid database model** that leverages the strengths of both SQL and NoSQL.^29^
+## 🛠 Technology Stack
 
-* **PostgreSQL:** Stores immutable, structured data such as blocks, transactions, and token transfers, ensuring ACID compliance and data integrity.
-* **MongoDB:** Stores flexible, unstructured data like OSINT tags, wallet cluster metadata, and investigation notes, allowing for rapid evolution of our intelligence models.
+| Layer                      | Technology                                           |
+| -------------------------- | ---------------------------------------------------- |
+| **Frontend**         | React.js, Tailwind CSS, D3.js, Axios, React Router   |
+| **Backend API**      | Node.js, Express.js                                  |
+| **ML Inference**     | Python, FastAPI/Flask                                |
+| **Blockchain Layer** | Ethers.js, Web3.js, Solidity                         |
+| **Databases**        | PostgreSQL (structured), MongoDB (graph/intel store) |
+| **AI/ML**            | PyTorch, Scikit-learn, NumPy, Pandas                 |
+| **Security Tools**   | Mythril, Slither, Echidna                            |
+| **DevOps**           | Docker, AWS (EC2, S3, RDS), GitHub Actions, Nginx    |
+| **OSINT**            | OpenSanctions API, DarkSearch API, Custom scrapers   |
 
-The data flows through a pipeline:
+---
+
+## 🏗 System Architecture
+
+ShadowTrace employs a **multi-layered, microservices architecture**:
 
 1. **Acquisition Layer:** Ingests raw data from blockchain nodes.
-2. **Processing & Analysis Layer:** Enriches and analyzes the data using our AI/ML models and heuristics.
-3. **Presentation Layer:** Delivers actionable intelligence to the user via the Analyst Dashboard and APIs.
+2. **Processing & Analysis Layer:** AI/ML pipelines enrich and analyze transactions.
+3. **Intel Fusion Layer:** OSINT + sanctions + metadata correlation.
+4. **Presentation Layer:** Analyst Dashboard & APIs deliver actionable insights.
 
-## Getting Started
+- **PostgreSQL:** Immutable structured storage (blocks, txs, transfers).
+- **MongoDB:** Flexible unstructured storage (intel tags, clusters, notes).
+
+---
+
+## ⚙️ Getting Started
 
 ### Prerequisites
 
-* Node.js (v18.x or later)
-* Python (v3.9 or later)
-* Docker and Docker Compose
-* PostgreSQL (v15 or later)
-* MongoDB (v6 or later)
-* An Infura or Alchemy API key for blockchain data access.
+- Node.js (>= 18.x)
+- Python (>= 3.9)
+- Docker + Docker Compose
+- PostgreSQL (>= 15)
+- MongoDB (>= 6)
+- Infura/Alchemy API key
 
 ### Installation
 
-1. **Clone the repository:**
-   **Bash**
+```bash
+# Clone repo
+git clone https://github.com/adityakaaltatva/shadowtrace.git
+cd shadowtrace
 
-   ```
-   git clone https://github.com/your-username/shadowtrace.git
-   cd shadowtrace
-   ```
-2. Set up environment variables:
-   Create a .env file in the root directory and populate it with your database credentials and blockchain API keys. A .env.example file is provided.
-   **Bash**
+# Copy env
+cp .env.example .env
+# Edit with DB + API keys
 
-   ```
-   cp.env.example.env
-   # Edit.env with your keys and credentials
-   ```
-3. **Install dependencies:**
+# Backend
+cd server && npm install
 
-   * **Backend (Node.js):**
-     **Bash**
+# Frontend
+cd client && npm install 
 
-     ```
-     cd server
-     npm install
-     ```
-   * **Frontend (React):**
-     **Bash**
 
-     ```
-     cd client
-     npm install
-     ```
-   * **ML Service (Python):**
-     **Bash**
 
-     ```
-     cd ml-service
-     pip install -r requirements.txt
-     ```
-4. Launch with Docker Compose:
-   From the root directory, run:
-   **Bash**
-
-   ```
-   docker-compose up --build
-   ```
-
-   This will build the images and start all the services, including the databases.
-
-## Usage
-
-Once the application is running, you can access the Analyst Dashboard at `http://localhost:3000`.
-
-* **Dashboard:** View real-time alerts and high-level metrics.
-* **Investigation:** Enter a wallet address or transaction hash to begin an investigation.
-* **Graph View:** Interact with the transaction graph to trace the flow of funds and explore wallet clusters.
-
-## Project Roadmap
-
-* **Phase 1 (MVP): Real-Time Situational Awareness (Ethereum)**
-  * [X] Core data ingestion pipeline for Ethereum.
-  * [X] Operational dashboard with D3.js visualizations.
-  * [ ] GNN-based wallet clustering engine.
-  * [ ] Basic OFAC sanctions list integration.
-* **Phase 2: Proactive Detection & Multi-Chain Support**
-  * [ ] Add support for **Binance Smart Chain (BSC)** and  **Polygon** .
-  * [ ] Deploy Autoencoder and Isolation Forest models for anomaly detection.
-  * [ ] Launch "Continuous Vulnerability Monitoring" with Mythril & Slither.
-  * [ ] Release V1 of the public API for wallet risk scores.
-* **Phase 3: Enterprise Readiness & Advanced Intelligence**
-  * [ ] Implement **SIEM integration** (Splunk, Elasticsearch).
-  * [ ] Expand OSINT capabilities to include leak datasets and dark web monitoring.
-  * [ ] Begin R&D for **Bitcoin (UTXO)** support.
-* **Long-Term Vision: The Privacy Frontier**
-  * [ ] Research and develop nove**l forensic techniques for privacy-focused networks like ** **Monero** **, tackling challenges like Ring Signatures and Stealth Addresses.**^32^
-
-## Contributing
-
-**Contributions are welcome! Please follow these steps:**
-
-1. Fork the repository.
-2. Create a new branch (`git checkout -b feature/your-feature-name`).
-3. Make your changes.
-4. Commit your changes (`git commit -m 'Add some feature'`).
-5. Push to the branch (`git push origin feature/your-feature-name`).
-6. Open a Pull Request.
-
-Please read `CONTRIBUTING.md` for more details on our code of conduct and the process for submitting pull requests.
-
-## License
-
-This project is licensed under the MIT License - see the(LICENSE.md) file for details.
-
-## Acknowledgments
-
-* Special thanks to the open-source community for the powerful tools and libraries that make ShadowTrace possible.
-* Inspired by the work of leading blockchain intelligence firms and academic researchers in the field.
+# Launch with Podman Compose
+docker-compose up --build
+```
