@@ -1,0 +1,34 @@
+{
+  "placeholderImages": [
+    {
+      "id": "force-directed-graph",
+      "description": "A complex force-directed graph showing transaction flows between wallet addresses.",
+      "imageUrl": "https://picsum.photos/seed/graph1/1200/800",
+      "imageHint": "network data"
+    },
+    {
+      "id": "cross-chain-sketch",
+      "description": "A sketch visualization of cross-chain interactions.",
+      "imageUrl": "https://picsum.photos/seed/graph2/400/300",
+      "imageHint": "abstract chart"
+    },
+    {
+      "id": "cluster-breakdown-pie",
+      "description": "A pie chart showing the breakdown of a cluster of wallets.",
+      "imageUrl": "https://picsum.photos/seed/graph3/400/300",
+      "imageHint": "pie chart"
+    },
+    {
+      "id": "peel-chain-timeline",
+      "description": "A timeline visualization of a peel chain analysis.",
+      "imageUrl": "https://picsum.photos/seed/graph4/400/300",
+      "imageHint": "timeline graph"
+    },
+    {
+      "id": "on-chain-analysis-graph",
+      "description": "A visualization of on-chain analysis and fund flow for a report.",
+      "imageUrl": "https://picsum.photos/seed/gnn/800/600",
+      "imageHint": "gnn graph"
+    }
+  ]
+}
