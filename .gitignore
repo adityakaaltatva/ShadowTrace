@@ -30,3 +30,6 @@ MANIFEST
 htmlcov/
 .env
 .venv
+
+
+structback

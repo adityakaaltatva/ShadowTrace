@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: shadow_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: shadow
+      POSTGRES_PASSWORD: shadowpass
+      POSTGRES_DB: shadow
+    ports:
+      - "5433:5432"   # FIXED: avoid host port 5432 conflict
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  mongo:
+    image: mongo:6
+    container_name: shadow_mongo
+    restart: always
+    ports:
+      - "27018:27017"   # optional: avoid port conflict if host has mongo
+    volumes:
+      - mongodata:/data/db
+
+  backend:
+    build:
+      context: ./backend
+    container_name: shadow_backend
+    restart: always
+
+    # FIX: load values from .env automatically
+    env_file:
+      - .env
+
+    depends_on:
+      - postgres
+      - mongo
+
+    environment:
+      # FIX: backend should access DBs through docker internal network
+      ETH_RPC: ${ETH_RPC}
+      PG_CONN: postgres://shadow:shadowpass@postgres:5432/shadow
+      MONGO_URI: mongodb://mongo:27017/shadow
+      PORT: ${PORT}
+
+    ports:
+      - "4000:4000"  # expose backend on your host
+
+    working_dir: /app
+    command: ["npm", "run", "start"]
+
+volumes:
+  pgdata:
+  mongodata:

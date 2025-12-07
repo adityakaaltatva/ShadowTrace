@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-pagerank": "^1.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1"
+  }
+}
