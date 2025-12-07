@@ -1,275 +1,326 @@
 /**
- * backend/src/intelligence/dealbreaker.ts
+ * dealbreaker.ts
  *
- * Rapid Stablecoin Chain-Hop Detector (the "dealbreaker")
+ * Heuristic, auditable "dealbreaker" algorithm for ShadowTrace.
+ * - TypeScript file (ES module / CommonJS friendly)
+ * - Pure logic: keeps light in-memory counters and emits persistent events via callbacks
  *
- * - Keeps a TTL sliding window of recent events per wallet (stable_in, erc_out, bridge_call)
- * - Heuristically scores temporal patterns (stable_in -> bridge within short window; structuring)
- * - Persists high-risk alerts to MongoDB and updates WalletProfile.risk_seed and tags
+ * Exported functions:
+ * - isKnownBridgeAddress(addr): boolean
+ * - recordStableIn(to, amountBigInt, txHash, ts, symbol)
+ * - recordErcOut(from, amountBigInt, txHash, ts)
+ * - recordBridgeCall(from, txHash, ts, to, chain)
+ * - evaluateWalletRisk(walletAddr): { riskScore, reasons }
  *
- * Usage (example):
- *  - import { recordStableIn, recordErcOut, recordBridgeCall, initDealbreaker } from "./dealbreaker";
- *  - await initDealbreaker(); // ensure Mongo connection already established elsewhere
- *  - When you decode an ERC20 transfer and token ∈ KNOWN_STABLES: await recordStableIn(toWallet, amountBigInt, txHash, ts)
- *  - When you detect outgoing ERC20 transfer: await recordErcOut(fromWallet, amountBigInt, txHash, ts)
- *  - When tx.to ∈ KNOWN_BRIDGES (or receipt logs show bridge event): await recordBridgeCall(txFrom, txHash, ts, bridgeAddress, targetChain)
+ * Design notes:
+ * - Rule-based scoring system that increments risk for high-value stable inflows,
+ *   repeated stable inflows in short windows, known bridge interactions, and rapid outflows.
+ * - Produces explainable reasons for each risk contributor.
+ * - Uses lightweight sliding windows + counters (memory) for fast demo. In prod you'd persist.
+ *
+ * Complexity:
+ * - record* operations: O(1) amortized per event
+ * - evaluateWalletRisk: O(k) where k = number of recent events for wallet
+ *
+ * Usage:
+ * - Import and call record* methods from the ethListener when transfers happen.
+ * - Periodically (or on-demand) call evaluateWalletRisk(address) to get score + reasons.
  */
 
-import { LRUCache as LRU } from "lru-cache";
-import mongoose, { Schema } from "mongoose";
-import { WalletProfile } from "../db/schemas/WalletProfile.js";
-import { KNOWN_BRIDGES } from "../config.js";
-import { Document } from "mongoose";
-
-type EventType = "stable_in" | "erc_out" | "bridge_call";
-
-type EventRecord = {
-  type: EventType;
-  amount: bigint; // raw token units (not normalized); use BigInt for safety
-  ts: number; // epoch ms
-  tx: string;
-  token?: string | undefined; // e.g., "USDT"
-  bridgeAddress?: string | undefined;
-  targetChain?: string | undefined;
+type TxRecord = {
+  hash: string;
+  ts: number;
+  amount: bigint;
+  symbol?: string;
+  from?: string;
+  to?: string;
 };
 
-type CacheValue = EventRecord[];
+type WalletState = {
+  stableInEvents: TxRecord[]; // recent stablecoin incoming transfers
+  outgoingEvents: TxRecord[];  // recent outgoing transfers
+  bridgeEvents: TxRecord[];    // known bridge txs involving wallet (incoming or outgoing)
+  accumulatedStableIn: bigint; // sum over time window
+  accumulatedOutgoing: bigint;
+};
 
-/* ---------- CONFIGURABLE HYPERPARAMETERS ---------- */
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes sliding window
-const BRIDGE_SHORT_MS = 10 * 60 * 1000; // bridge within 10 minutes after stable_in is strong signal
-const LARGE_STABLE_THRESHOLD = BigInt(1_000_000 * 10 ** 6); // example: 1,000,000 * 10^6 smallest units if token decimals=6 (adjust to real decimals)
-const SMALL_OUT_THRESHOLD = BigInt(1_000 * 10 ** 6); // e.g., small out = < 1,000 USDT (adjust)
-const SMALL_OUT_COUNT_FOR_STRUCTURING = 10; // 10 small outs after stable_in considered structuring
-const SCORE_ALERT_THRESHOLD = 60; // final normalized score threshold to emit alert
-const MAX_CACHE_SIZE = 10000; // max wallets in LRU cache
+// --------------------------- CONFIG / HYPERPARAMETERS ---------------------------
+const CONFIG = {
+  STABLE_HIGH_VALUE_THRESHOLD: BigInt(1000) * BigInt(10) ** BigInt(6), // 1000 * 1e6 (eg USDC 6 decimals) => representational
+  // windows are in milliseconds
+  WINDOW_24H: 24 * 60 * 60 * 1000,
+  WINDOW_1H: 60 * 60 * 1000,
+  RAPID_INFLOW_COUNT: 3, // more than this many stable inflows in small window -> suspicious
+  RAPID_INFLOW_WINDOW: 60 * 60 * 1000, // 1 hour
+  OUTFLOW_RATIO_THRESHOLD: 0.8, // if outgoing ~80% of recent inflows => higher risk
+  BRIDGE_PENALTY: 30, // fixed score penalty for known bridge involvement
+  HIGH_VALUE_PENALTY: 40,
+  RAPID_INFLOW_PENALTY: 35,
+  OUTFLOW_PATTERN_PENALTY: 25,
+  MAX_SCORE: 100
+};
 
-/* ---------- IN-MEMORY SLIDING WINDOW (LRU) ---------- */
-const cache = new LRU<string, CacheValue>({
-  max: MAX_CACHE_SIZE,
-  ttl: WINDOW_MS, // ensures entries older than WINDOW_MS removed automatically
-});
+// --------------------------- KNOWN LISTS (example) ---------------------------
+// In production these would be loaded from config/DB/OSINT feeds.
+const KNOWN_STABLES = [
+  // --- Major Stablecoins ---
+  { addr: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", symbol: "USDC", decimals: 6 },
+  { addr: "0xdac17f958d2ee523a2206206994597c13d831ec7", symbol: "USDT", decimals: 6 },
+  { addr: "0x6b175474e89094c44da98b954eedeac495271d0f", symbol: "DAI", decimals: 18 },
 
-/* ---------- ALERT SCHEMA (persist to Mongo) ---------- */
-interface IAlert extends Document {
-  wallet: string;
-  score: number;
-  reasons: string[];
-  events: EventRecord[];
-  createdAt: Date;
+  // --- FRAX ecosystem ---
+  { addr: "0x853d955acef822db058eb8505911ed77f175b99e", symbol: "FRAX", decimals: 18 },
+  { addr: "0x3432b6a60d23ca0dfca7761b7ab56459d9c964d0", symbol: "FXS", decimals: 18 }, // governance token (optional)
+
+  // --- BUSD (legacy Paxos) ---
+  { addr: "0x4fabb145d64652a948d72533023f6e7a623c7c53", symbol: "BUSD", decimals: 18 },
+
+  // --- Liquity USD stable ---
+  { addr: "0x5f98805a4e8be255a32880fdec7f6728c6568ba0", symbol: "LUSD", decimals: 18 },
+
+  // --- Pax Dollar (USDP) ---
+  { addr: "0x8e870d67f660d95d5be530380d0ec0bd388289e1", symbol: "USDP", decimals: 18 },
+
+  // --- TrueUSD ---
+  { addr: "0x0000000000085d4780b73119b644ae5ecd22b376", symbol: "TUSD", decimals: 18 },
+
+  // --- Synthetic USD (sUSD) ---
+  { addr: "0x57ab1ec28d129707052df4df418d58a2d46d5f51", symbol: "sUSD", decimals: 18 },
+
+  // --- Gemini Dollar (GUSD) ---
+  { addr: "0x056fd409e1d7a124bd7017459dfea2f387b6d5cd", symbol: "GUSD", decimals: 2 },
+
+  // --- PayPal USD (PYUSD) ---
+  { addr: "0x6c3ea9036406852006290770bebb3a1e7c638c1d", symbol: "PYUSD", decimals: 6 },
+
+  // --- Curve's crvUSD stablecoin ---
+  { addr: "0xf939e0a03fb07f59a73314e73794be0e57ac1b4e", symbol: "crvUSD", decimals: 18 },
+
+  // --- Ethena synthetic USD (USDe) ---
+  { addr: "0x4c9edd5852cd905f086c759e8383e09bff1e68b3", symbol: "USDe", decimals: 18 },
+
+  // --- Lybra Finance eUSD ---
+  { addr: "0x168e4498ee218becdf565fd250eeba588c56a907", symbol: "eUSD", decimals: 18 }
+];
+
+
+const KNOWN_BRIDGES = new Set<string>([
+  // sample
+  "0x1111111254fb6c44bac0bed2854e76f90643097d".toLowerCase(), // example : 1inch? (example only)
+  // add real bridge addresses here...
+]);
+
+// --------------------------- IN-MEMORY STATE (demo) ---------------------------
+// For demo / interview this is fine. Production: use time-series DB (Redis/mongo) + TTL.
+const walletStore: Map<string, WalletState> = new Map();
+
+/** helper: get or create wallet state */
+function getWalletState(addr: string): WalletState {
+  const key = addr.toLowerCase();
+  let w = walletStore.get(key);
+  if (!w) {
+    w = {
+      stableInEvents: [],
+      outgoingEvents: [],
+      bridgeEvents: [],
+      accumulatedStableIn: BigInt(0),
+      accumulatedOutgoing: BigInt(0),
+    };
+    walletStore.set(key, w);
+  }
+  return w;
 }
 
-const AlertSchema = new Schema<IAlert>(
-  {
-    wallet: { type: String, index: true },
-    score: Number,
-    reasons: [String],
-    events: [{ type: Schema.Types.Mixed }],
-  },
-  { timestamps: { createdAt: "createdAt", updatedAt: false } }
-);
-
-const AlertModel = mongoose.models.Alert || mongoose.model<IAlert>("Alert", AlertSchema);
-
-/* ---------- DEDUPLICATION: ensure we don't emit duplicate alerts for same wallet + reason in window ---------- */
-const alertDeduper = new LRU<string, number>({ max: 20000, ttl: WINDOW_MS });
-
-function dedupeKey(wallet: string, tag: string) {
-  return `${wallet}:${tag}`;
+/** helper: purge old events outside a window */
+function purgeOld(events: TxRecord[], windowMs: number, now = Date.now()) {
+  let i = 0;
+  while (i < events.length && events[i].ts < now - windowMs) i++;
+  if (i > 0) events.splice(0, i);
 }
 
-/* ---------- HELPERS ---------- */
-function nowMs() {
-  return Date.now();
-}
+// --------------------------- EXPORTS ---------------------------
 
-function pushEvent(wallet: string, ev: EventRecord) {
-  wallet = wallet.toLowerCase();
-  const arr = cache.get(wallet) || [];
-  arr.push(ev);
-  // prune old events by explicit filter (LRU ttl will also clean)
-  const cutoff = nowMs() - WINDOW_MS;
-  const recent = arr.filter((e) => e.ts >= cutoff);
-  cache.set(wallet, recent);
-}
-
-function getRecent(wallet: string) {
-  wallet = wallet.toLowerCase();
-  const arr = cache.get(wallet) || [];
-  const cutoff = nowMs() - WINDOW_MS;
-  return arr.filter((e) => e.ts >= cutoff);
-}
-
-/* ---------- SCORING LOGIC ---------- */
-async function evaluateWallet(wallet: string) {
-  wallet = wallet.toLowerCase();
-  const events = getRecent(wallet);
-  if (events.length === 0) return;
-
-  // partition events
-  const stableIns = events.filter((e) => e.type === "stable_in");
-  const bridgeCalls = events.filter((e) => e.type === "bridge_call");
-  const ercOuts = events.filter((e) => e.type === "erc_out");
-
-  // If no stable incoming -> low baseline risk from this detector
-  if (stableIns.length === 0) return;
-
-  // compute heuristic score
-  let score = 0;
-  const reasons: string[] = [];
-
-  // 1. Large stable inflow
-  const largeStable = stableIns.some((s) => s.amount >= LARGE_STABLE_THRESHOLD);
-  if (largeStable) {
-    score += 40;
-    reasons.push("large_stable_in");
-  }
-
-  // 2. Bridge call within BRIDGE_SHORT_MS after ANY stable_in
-  // find if any pair exists such that bridge.ts - stable.ts < BRIDGE_SHORT_MS and > 0
-  let bridgeSoon = false;
-  for (const s of stableIns) {
-    for (const b of bridgeCalls) {
-      if (b.ts >= s.ts && b.ts - s.ts <= BRIDGE_SHORT_MS) {
-        bridgeSoon = true;
-        break;
-      }
-    }
-    if (bridgeSoon) break;
-  }
-  if (bridgeSoon) {
-    score += 45;
-    reasons.push("bridge_within_short_window");
-  }
-
-  // 3. Structuring: many small outs after the most recent stable_in
-  const lastStable = stableIns.reduce((a, b) => (a.ts > b.ts ? a : b));
-  const outsAfter = ercOuts.filter((o) => o.ts >= lastStable.ts);
-  const smallOuts = outsAfter.filter((o) => o.amount <= SMALL_OUT_THRESHOLD);
-  if (smallOuts.length >= SMALL_OUT_COUNT_FOR_STRUCTURING) {
-    score += 30;
-    reasons.push("structuring_many_small_outs");
-  }
-
-  // 4. Quick chain of transfers (many outs + immediate bridge) - amplify
-  if (bridgeSoon && smallOuts.length >= Math.floor(SMALL_OUT_COUNT_FOR_STRUCTURING / 2)) {
-    score += 15;
-    reasons.push("amplified_bridge_structuring");
-  }
-
-  // 5. Optional: cluster amplification placeholder (requires cluster service)
-  // if (await inSuspiciousCluster(wallet)) { score += 10; reasons.push("cluster_amplification"); }
-
-  // normalize score to 0..100 (cap)
-  if (score > 100) score = 100;
-  if (score < 0) score = 0;
-
-  // Emit alert if crossing threshold
-  if (score >= SCORE_ALERT_THRESHOLD) {
-    // dedupe by wallet + reason set
-    const tag = reasons.sort().join("|") || "rapid_chain_hop";
-    const key = dedupeKey(wallet, tag);
-
-    if (!alertDeduper.has(key)) {
-      alertDeduper.set(key, nowMs());
-      await persistAlert(wallet, score, reasons, events);
-      // update wallet profile
-      await WalletProfile.updateOne(
-        { wallet },
-        { $set: { risk_seed: score, last_seen: new Date() }, $addToSet: { tags: { $each: ["rapid_chain_hop", ...reasons] } } },
-        { upsert: true }
-      );
-      console.log(`[DEALBREAKER] ALERT: ${wallet} score=${score} reasons=${reasons.join(",")}`);
-    } else {
-      // already alerted recently for same signature
-    }
-  } else {
-    // For lower scores, update risk_seed lightly (non-urgent)
-    await WalletProfile.updateOne({ wallet }, { $set: { risk_seed: Math.max(0, score) }, $setOnInsert: { last_seen: new Date() } }, { upsert: true });
-  }
-}
-
-/* ---------- PERSIST ALERT ---------- */
-async function persistAlert(wallet: string, score: number, reasons: string[], events: EventRecord[]) {
-  try {
-    const doc = new AlertModel({ wallet, score, reasons, events });
-    await doc.save();
-  } catch (e) {
-    console.error("persistAlert error:", e);
-  }
-}
-
-/* ---------- EXPORTS: functions to be called from ingestion pipeline ---------- */
-
-/**
- * recordStableIn
- * - wallet: destination address (receiver)
- * - amount: BigInt (raw token units)
- * - tx: tx hash
- * - ts: epoch ms (optional; defaults to now)
- */
-export async function recordStableIn(wallet: string, amount: bigint, tx: string, ts?: number, token?: string) {
-  try {
-    const ev: EventRecord = { type: "stable_in", amount, ts: ts || nowMs(), tx, token };
-    pushEvent(wallet, ev);
-    await evaluateWallet(wallet);
-  } catch (e) {
-    console.error("recordStableIn error", e);
-  }
-}
-
-/**
- * recordErcOut
- * - wallet: sender address
- * - amount: BigInt (raw token units)
- */
-export async function recordErcOut(wallet: string, amount: bigint, tx: string, ts?: number) {
-  try {
-    const ev: EventRecord = { type: "erc_out", amount, ts: ts || nowMs(), tx };
-    pushEvent(wallet, ev);
-    await evaluateWallet(wallet);
-  } catch (e) {
-    console.error("recordErcOut error", e);
-  }
-}
-
-/**
- * recordBridgeCall
- * - wallet: tx.from (who called the bridge)
- * - tx: tx hash
- * - ts: epoch ms
- * - bridgeAddress: contract address called
- * - targetChain: optional target chain identifier
- */
-export async function recordBridgeCall(wallet: string, tx: string, ts?: number, bridgeAddress?: string, targetChain?: string) {
-  try {
-    const ev: EventRecord = { type: "bridge_call", amount: BigInt(0), ts: ts || nowMs(), tx, bridgeAddress, targetChain };
-    pushEvent(wallet, ev);
-    await evaluateWallet(wallet);
-  } catch (e) {
-    console.error("recordBridgeCall error", e);
-  }
-}
-
-/* ---------- Utility: attempt to detect bridge txs from tx.to or logs (ingestion should call) ---------- */
-export function isKnownBridgeAddress(addr?: string) {
+export function isKnownBridgeAddress(addr: string): boolean {
   if (!addr) return false;
-  try {
-    return KNOWN_BRIDGES.some((b) => b.toLowerCase() === addr.toLowerCase());
-  } catch {
-    return false;
+  return KNOWN_BRIDGES.has(addr.toLowerCase());
+}
+
+/**
+ * getRecentEvents: returns all recent events for a wallet (for graph/stats)
+ */
+export function getRecentEvents(wallet: string) {
+  const state = walletStore.get(wallet.toLowerCase());
+  if (!state) return [];
+  // combine all events and sort by timestamp descending
+  const allEvents = [
+    ...state.stableInEvents,
+    ...state.outgoingEvents,
+    ...state.bridgeEvents,
+  ].sort((a, b) => b.ts - a.ts);
+  return allEvents;
+}
+
+/**
+ * Cache-like object for backward compatibility (for recentEvents.ts)
+ */
+export const cache = {
+  get: (wallet: string) => getRecentEvents(wallet),
+};
+
+/**
+ * recordStableIn: called when a stablecoin transfer is detected as incoming to `to`.
+ * - amount is BigInt (raw token units)
+ * - symbol & decimals are optional; if present we assume decimals known (for display)
+ */
+export function recordStableIn(
+  to: string,
+  amount: bigint,
+  txHash: string,
+  ts = Date.now(),
+  symbol?: string
+) {
+  if (!to) return;
+  const wallet = getWalletState(to);
+  wallet.stableInEvents.push({ hash: txHash, ts, amount, symbol, to });
+  wallet.accumulatedStableIn += amount;
+
+  // keep events sorted by ts ascending (push usually ok)
+  // purge very old beyond 24h to limit memory
+  purgeOld(wallet.stableInEvents, CONFIG.WINDOW_24H, ts);
+}
+
+/**
+ * recordErcOut: called when an ERC transfer from `from` is detected (outgoing).
+ */
+export function recordErcOut(from: string, amount: bigint, txHash: string, ts = Date.now()) {
+  if (!from) return;
+  const wallet = getWalletState(from);
+  wallet.outgoingEvents.push({ hash: txHash, ts, amount, from });
+  wallet.accumulatedOutgoing += amount;
+  purgeOld(wallet.outgoingEvents, CONFIG.WINDOW_24H, ts);
+}
+
+/**
+ * recordBridgeCall: record a bridge interaction for later scoring.
+ */
+export function recordBridgeCall(from: string, txHash: string, ts = Date.now(), to?: string, chain?: string) {
+  // record for both sides if provided
+  if (from) {
+    const w = getWalletState(from);
+    w.bridgeEvents.push({ hash: txHash, ts, from, to: to, amount: BigInt(0) });
+    purgeOld(w.bridgeEvents, CONFIG.WINDOW_24H, ts);
+  }
+  if (to) {
+    const w2 = getWalletState(to);
+    w2.bridgeEvents.push({ hash: txHash, ts, from, to, amount: BigInt(0) });
+    purgeOld(w2.bridgeEvents, CONFIG.WINDOW_24H, ts);
   }
 }
 
-/* ---------- Init helper (optional) ---------- */
-export async function initDealbreaker() {
-  // No-op currently. Kept for future initialization (e.g., load persistent recent events)
-  // Ensure mongoose connection is active before using (connectMongo elsewhere)
-  if (mongoose.connection.readyState !== 1) {
-    console.warn("initDealbreaker: mongoose not connected (call connectMongo first)");
+/**
+ * evaluateWalletRisk: compute risk score + human reasons for the wallet using current in-memory state.
+ * Returns { riskScore (0-100), reasons: string[] }
+ */
+export function evaluateWalletRisk(addr: string, now = Date.now()): { riskScore: number; reasons: string[] } {
+  const key = (addr || "").toLowerCase();
+  const state = walletStore.get(key);
+  if (!state) return { riskScore: 0, reasons: [] };
+
+  const reasons: string[] = [];
+  let score = 0;
+
+  // purge outside windows for accurate snapshots
+  purgeOld(state.stableInEvents, CONFIG.WINDOW_24H, now);
+  purgeOld(state.outgoingEvents, CONFIG.WINDOW_24H, now);
+  purgeOld(state.bridgeEvents, CONFIG.WINDOW_24H, now);
+
+  // 1) High single stable inflow
+  const recentLargeIns = state.stableInEvents.filter(ev => ev.amount >= CONFIG.STABLE_HIGH_VALUE_THRESHOLD);
+  if (recentLargeIns.length > 0) {
+    score += CONFIG.HIGH_VALUE_PENALTY;
+    reasons.push(`High-value stable inflow(s) (${recentLargeIns.length}) in 24h`);
   }
+
+  // 2) Rapid repeated stable inflows in small window
+  const windowStart = now - CONFIG.RAPID_INFLOW_WINDOW;
+  const rapidIns = state.stableInEvents.filter(ev => ev.ts >= windowStart);
+  if (rapidIns.length >= CONFIG.RAPID_INFLOW_COUNT) {
+    score += CONFIG.RAPID_INFLOW_PENALTY;
+    reasons.push(`Rapid stable inflow burst: ${rapidIns.length} transfers within ${CONFIG.RAPID_INFLOW_WINDOW / 60000}m`);
+  }
+
+  // 3) Known bridge involvement
+  if (state.bridgeEvents.length > 0) {
+    score += CONFIG.BRIDGE_PENALTY;
+    reasons.push(`Involved in bridge calls (${state.bridgeEvents.length})`);
+  }
+
+  // 4) Outflow pattern: outgoing roughly equals inflows (possible laundering)
+  // compute sums in 24h window
+  const sumIn24 = state.stableInEvents.reduce((s, e) => s + e.amount, BigInt(0));
+  const sumOut24 = state.outgoingEvents.reduce((s, e) => s + e.amount, BigInt(0));
+  // avoid division by zero
+  if (sumIn24 > BigInt(0)) {
+    // compute ratio as float safely
+    const ratio = Number(sumOut24) / Number(sumIn24); // OK for demo; switch to bigfloat in prod
+    if (ratio >= CONFIG.OUTFLOW_RATIO_THRESHOLD) {
+      score += CONFIG.OUTFLOW_PATTERN_PENALTY;
+      reasons.push(`High outflow ratio: ${(ratio * 100).toFixed(1)}% of recent stable inflows`);
+    }
+  }
+
+  // 5) Frequency heuristic: lots of activity small amounts (micropattern) -> suspicious but lower weight
+  const txCount24 = state.stableInEvents.length + state.outgoingEvents.length + state.bridgeEvents.length;
+  if (txCount24 > 50) {
+    score += 8;
+    reasons.push(`High transaction count in 24h: ${txCount24}`);
+  }
+
+  // 6) Cap and normalize to 0-100
+  if (score > CONFIG.MAX_SCORE) score = CONFIG.MAX_SCORE;
+
+  // If no reasons but some small activity -> give small base score (low noise)
+  if (reasons.length === 0 && txCount24 > 0) {
+    score = Math.min(score + 5, CONFIG.MAX_SCORE);
+    reasons.push("Low-level activity detected (no major rules triggered)");
+  }
+
+  return { riskScore: Math.round(score), reasons };
 }
 
-/* ---------- Export types for tests or external usage ---------- */
-export type { EventRecord };
-export { cache }; 
+// --------------------------- SMALL DEMO HARNESS (ESM SAFE) ---------------------------
+
+// Determine if this file is being run directly via: `node dealbreaker.ts`
+const isMain =
+  import.meta.url === new URL(process.argv[1], "file://" + process.cwd() + "/").href;
+
+if (isMain) {
+  (async () => {
+    console.log("Demo: Dealbreaker algorithm (ESM)");
+
+    // sample addresses
+    const alice = "0xAlice000000000000000000000000000000000000".toLowerCase();
+    const bob = "0xbob0000000000000000000000000000000000000".toLowerCase();
+
+    const big = CONFIG.STABLE_HIGH_VALUE_THRESHOLD + BigInt(5000);
+    const t0 = Date.now() - 1000 * 60 * 30; // 30m ago
+
+    // Bob: 3 large inflows rapidly
+    recordStableIn(bob, big, "tx1", t0, "USDC");
+    recordStableIn(bob, big, "tx2", t0 + 1000 * 60 * 5, "USDC");
+    recordStableIn(bob, big, "tx3", t0 + 1000 * 60 * 10, "USDC");
+
+    // Bob: 90% out
+    const outAmt = (big * BigInt(9)) / BigInt(10);
+    recordErcOut(bob, outAmt, "txout1", t0 + 1000 * 60 * 12);
+
+    // Bob: bridge call
+    recordBridgeCall(bob, "bridge1", t0 + 1000 * 60 * 15, "0xbridge", "unknown");
+
+    console.log("Bob risk:", evaluateWalletRisk(bob));
+
+    // Alice low activity
+    recordStableIn(alice, BigInt(10) * BigInt(10) ** BigInt(6), "txsmall", Date.now() - 1000 * 60 * 60 * 10, "USDC");
+    console.log("Alice risk:", evaluateWalletRisk(alice));
+  })();
+}
