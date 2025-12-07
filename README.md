@@ -107,25 +107,4 @@ ShadowTrace employs a **multi-layered, microservices architecture**:
 - MongoDB (>= 6)
 - Infura/Alchemy API key
 
-### Installation
 
-```bash
-# Clone repo
-git clone https://github.com/adityakaaltatva/shadowtrace.git
-cd shadowtrace
-
-# Copy env
-cp .env.example .env
-# Edit with DB + API keys
-
-# Backend
-cd server && npm install
-
-# Frontend
-cd client && npm install 
-
-
-
-# Launch with Podman Compose
-docker-compose up --build
-```
