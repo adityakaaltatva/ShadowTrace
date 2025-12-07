@@ -19,7 +19,9 @@
     "express": "^5.2.1",
     "lru-cache": "^11.2.4",
     "mongoose": "^9.0.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "bench": "node --loader ts-node/esm src/intelligence/bench_dealbreaker.ts"
+
   },
 
   "devDependencies": {
