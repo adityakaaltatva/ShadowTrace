@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-export const ETH_RPC = process.env.ETH_RPC!;
-export const PG_CONN = process.env.PG_CONN!;
-export const MONGO_URI = process.env.MONGO_URI!;
+export const ETH_RPC = process.env.ETH_RPC || "http://localhost:8545"; // fallback to local node
+export const PG_CONN = process.env.PG_CONN || "postgresql://user:pass@localhost:5432/shadowtrace";
+export const MONGO_URI = process.env.MONGO_URI || "mongodb://localhost:27017/shadowtrace";
 
 export const KNOWN_STABLES = [
   { addr: "0xdAC17F958D2ee523a2206206994597C13D831ec7", symbol: "USDT", decimals: 6 },

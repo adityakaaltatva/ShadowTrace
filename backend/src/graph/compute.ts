@@ -45,8 +45,23 @@ export async function recomputeGraph(options: { minEdgeWeight?: number } = {}) {
     }
   }
 
-  // pagerank (returns map node -> score)
-  const pr = pagerank(g, { getEdgeWeight: (edge) => g.getEdgeAttribute(edge, "weight") || 1 });
+  // Skip computation if graph is too small (no edges)
+  if (g.order === 0 || g.size === 0) {
+    console.warn("⚠️ Graph too small: skipping pagerank/louvain computation");
+    return { nodes: 0, edges: 0 };
+  }
+
+  // pagerank with error handling (may fail to converge with sparse graphs)
+  let pr: any = {};
+  try {
+    pr = pagerank(g, { getEdgeWeight: (edge) => g.getEdgeAttribute(edge, "weight") || 1 });
+  } catch (err) {
+    console.warn("⚠️ PageRank convergence failed (sparse graph):", err);
+    // fallback: assign equal pagerank to all nodes
+    for (const node of g.nodes()) {
+      pr[node] = 1 / g.order;
+    }
+  }
   // write pagerank to mongo
   const bulkNodeOps: any[] = [];
   for (const [node, score] of Object.entries(pr)) {
