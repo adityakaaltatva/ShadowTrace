@@ -10,22 +10,25 @@
  * - recordStableIn(to, amountBigInt, txHash, ts, symbol)
  * - recordErcOut(from, amountBigInt, txHash, ts)
  * - recordBridgeCall(from, txHash, ts, to, chain)
- * - evaluateWalletRisk(walletAddr): { riskScore, reasons }
+ * - evaluateWalletRisk(walletAddr): Promise<{ riskScore, reasons }>
  *
  * Design notes:
  * - Rule-based scoring system that increments risk for high-value stable inflows,
  *   repeated stable inflows in short windows, known bridge interactions, and rapid outflows.
  * - Produces explainable reasons for each risk contributor.
  * - Uses lightweight sliding windows + counters (memory) for fast demo. In prod you'd persist.
+ * - Integrates OSINT enrichment to boost risk scores based on external threat intelligence.
  *
  * Complexity:
  * - record* operations: O(1) amortized per event
- * - evaluateWalletRisk: O(k) where k = number of recent events for wallet
+ * - evaluateWalletRisk: O(k) where k = number of recent events for wallet + OSINT lookup
  *
  * Usage:
  * - Import and call record* methods from the ethListener when transfers happen.
- * - Periodically (or on-demand) call evaluateWalletRisk(address) to get score + reasons.
+ * - Periodically (or on-demand) call evaluateWalletRisk(address) to get score + reasons (async).
  */
+
+import { resolveOSINTForAddress } from "../osint/taintEngine.js";
 
 type TxRecord = {
   hash: string;
@@ -218,10 +221,10 @@ export function recordBridgeCall(from: string, txHash: string, ts = Date.now(), 
 }
 
 /**
- * evaluateWalletRisk: compute risk score + human reasons for the wallet using current in-memory state.
- * Returns { riskScore (0-100), reasons: string[] }
+ * computeHeuristicScore: compute dealbreaker heuristic risk score (synchronous).
+ * Internal helper used by evaluateWalletRisk.
  */
-export function evaluateWalletRisk(addr: string, now = Date.now()): { riskScore: number; reasons: string[] } {
+function computeHeuristicScore(addr: string, now = Date.now()): { riskScore: number; reasons: string[] } {
   const key = (addr || "").toLowerCase();
   const state = walletStore.get(key);
   if (!state) return { riskScore: 0, reasons: [] };
@@ -288,7 +291,40 @@ export function evaluateWalletRisk(addr: string, now = Date.now()): { riskScore:
   return { riskScore: Math.round(score), reasons };
 }
 
+/**
+ * evaluateWalletRisk: async wrapper that combines heuristic scoring with OSINT enrichment.
+ * Calls resolveOSINTForAddress to fetch threat intelligence tags and risk boosts,
+ * then merges scores and appends OSINT tags as reasons.
+ */
+export async function evaluateWalletRisk(
+  addr: string
+): Promise<{ riskScore: number; reasons: string[] }> {
+  // Get heuristic score first
+  const heuristic = computeHeuristicScore(addr);
+
+  // Fetch OSINT enrichment (may fail gracefully if service unavailable)
+  let osintData: { riskBoost: number; tags: string[] } = { riskBoost: 0, tags: [] };
+  try {
+    osintData = await resolveOSINTForAddress(addr, process.env.MONGO_URI);
+  } catch (err) {
+    console.warn(`OSINT enrichment failed for ${addr}:`, err);
+    // Continue with heuristic score only
+  }
+
+  // Combine scores (cap at 100)
+  const finalScore = Math.min(100, heuristic.riskScore + osintData.riskBoost);
+
+  // Append OSINT tags as reasons
+  const osintReasons = osintData.tags.map((tag) => `OSINT_TAG:${tag}`);
+
+  return {
+    riskScore: finalScore,
+    reasons: [...heuristic.reasons, ...osintReasons],
+  };
+}
+
 // --------------------------- SMALL DEMO HARNESS (ESM SAFE) ---------------------------
+
 
 // Determine if this file is being run directly via: `node dealbreaker.ts`
 const isMain =
