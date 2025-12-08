@@ -2,28 +2,27 @@
   "name": "shadowtrace-backend",
   "version": "1.0.0",
   "type": "module",
-
   "scripts": {
     "dev": "nodemon src/api/server.ts",
     "build": "tsc",
     "start": "node dist/api/server.js",
     "dealbreaker": "node dist/intelligence/dealbreaker.js"
   },
-
   "dependencies": {
     "axios": "^1.13.2",
+    "bench": "node --loader ts-node/esm src/intelligence/bench_dealbreaker.ts",
     "bignumber.js": "^9.3.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "ethers": "^6.16.0",
     "express": "^5.2.1",
+    "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-pagerank": "^1.1.0",
     "lru-cache": "^11.2.4",
     "mongoose": "^9.0.1",
-    "pg": "^8.16.3",
-    "bench": "node --loader ts-node/esm src/intelligence/bench_dealbreaker.ts"
-
+    "pg": "^8.16.3"
   },
-
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",

@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { JsonRpcProvider } from "ethers";
 import { ETH_RPC, KNOWN_STABLES } from "../config.js";
 import { pg, initPg } from "../db/pgClient.js";
 import { connectMongo } from "../db/mongoClient.js";
@@ -13,8 +13,8 @@ import {
   isKnownBridgeAddress
 } from "../intelligence/dealbreaker.js";
 
-// ---- ETHERS v5 PROVIDER ----
-const provider = new ethers.providers.JsonRpcProvider(
+// ---- ETHERS v6 PROVIDER ----
+const provider = new JsonRpcProvider(
   ETH_RPC || process.env.ETH_RPC
 );
 
@@ -22,12 +22,12 @@ export async function startListener() {
   await initPg();
   await connectMongo();
 
-  console.log("🔥 ShadowTrace Ethereum Listener Started (ethers v5)");
+  console.log("🔥 ShadowTrace Ethereum Listener Started (ethers v6)");
 
   provider.on("block", async (blockNumber: number) => {
     try {
-      // Fetch full block with transactions
-      const block = await provider.getBlockWithTransactions(blockNumber);
+      // Fetch block (ethers v6)
+      const block = await provider.getBlock(blockNumber);
       if (!block) return;
 
       await pg.query(
@@ -35,7 +35,10 @@ export async function startListener() {
         [blockNumber, block.timestamp]
       );
 
-      for (const tx of block.transactions) {
+      // Fetch each transaction individually
+      const txHashes = block.transactions as string[];
+      for (const txHash of txHashes) {
+        const tx = await provider.getTransaction(txHash);
         if (!tx) continue;
 
         // Store transaction

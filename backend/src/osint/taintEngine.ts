@@ -1,6 +1,11 @@
 import { MongoClient } from "mongodb";
 
-export async function resolveOSINTForAddress(addr: string, mongoUrl: string) {
+export async function resolveOSINTForAddress(addr: string, mongoUrl?: string) {
+  // Gracefully handle missing MongoDB URI (for benchmarks, dev, testing without DB)
+  if (!mongoUrl) {
+    return { riskBoost: 0, tags: [] };
+  }
+
   const client = new MongoClient(mongoUrl);
   await client.connect();
   const col = client.db().collection("osint_feeds");
